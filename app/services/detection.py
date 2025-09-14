@@ -15,8 +15,8 @@ import os
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, Union
-
+from typing import Optional
+from huggingface_hub import hf_hub_download
 try:
     from ultralytics import YOLO  # type: ignore
 except Exception as e:  # pragma: no cover
@@ -30,8 +30,17 @@ try:
 except Exception:  # pragma: no cover
     Image = None  # type: ignore
 
-DEFAULT_CUSTOM = Path("model/best.pt")
 ENV_VAR = "YOLO_MODEL_PATH"
+
+# Attempt to download custom weights once at import time, but don't instantiate model yet.
+# If download fails (e.g., no internet), we gracefully fall back later.
+try:  # pragma: no cover - network/io
+    _downloaded_custom = hf_hub_download(repo_id="avgsoyam/yolo-garbage-detector", filename="best.pt")
+except Exception:  # pragma: no cover
+    _downloaded_custom = None
+
+# Store only the Path (or None). We previously stored a YOLO model object here which broke .exists() usage.
+DEFAULT_CUSTOM: Optional[Path] = Path(_downloaded_custom) if _downloaded_custom else None
 
 
 class ModelLoadError(RuntimeError):
@@ -39,12 +48,19 @@ class ModelLoadError(RuntimeError):
 
 
 def _select_weight_path() -> Optional[Path]:
+    """Return a usable weight file path or None for fallback.
+
+    Priority:
+      1. Env var YOLO_MODEL_PATH if it exists.
+      2. Downloaded custom model (best.pt) if present.
+      3. None -> caller will use default pretrained name.
+    """
     env_path = os.getenv(ENV_VAR)
     if env_path:
         p = Path(env_path)
         if p.exists():
             return p
-    if DEFAULT_CUSTOM.exists():
+    if DEFAULT_CUSTOM and DEFAULT_CUSTOM.exists():
         return DEFAULT_CUSTOM
     return None
 
