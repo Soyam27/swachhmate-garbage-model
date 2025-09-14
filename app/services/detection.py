@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 try:
     from ultralytics import YOLO  # type: ignore
@@ -24,7 +25,12 @@ except Exception as e:  # pragma: no cover
 else:  # pragma: no cover
     _import_error = None
 
-DEFAULT_CUSTOM = Path("runs/detect/train8/weights/best.pt")
+try:
+    from PIL import Image
+except Exception:  # pragma: no cover
+    Image = None  # type: ignore
+
+DEFAULT_CUSTOM = Path("model/best.pt")
 ENV_VAR = "YOLO_MODEL_PATH"
 
 
@@ -61,4 +67,21 @@ def detect_garbage(image_path: str) -> bool:
     """
     model = _get_model()
     results = model(image_path, verbose=False)
+    return any(len(r.boxes) > 0 for r in results)
+
+
+def detect_garbage_bytes(data: bytes, suffix: str = ".jpg") -> bool:
+    """Run detection directly on raw image bytes without persisting to uploads.
+
+    Ultralytics YOLO predict() can take a BytesIO stream or numpy/PIL image. We
+    feed a BytesIO to avoid disk writes. Suffix hints the image format.
+    """
+    model = _get_model()
+    if Image is None:
+        raise ModelLoadError("Pillow is required for in-memory image decoding. Install with `pip install Pillow`.")
+    try:
+        img = Image.open(BytesIO(data)).convert("RGB")
+    except Exception as e:
+        raise ModelLoadError(f"Invalid image data: {e}")
+    results = model(img, verbose=False)
     return any(len(r.boxes) > 0 for r in results)
