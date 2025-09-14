@@ -16,7 +16,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import Optional, Union
-
+from huggingface_hub import hf_hub_download
 try:
     from ultralytics import YOLO  # type: ignore
 except Exception as e:  # pragma: no cover
@@ -30,8 +30,14 @@ try:
 except Exception:  # pragma: no cover
     Image = None  # type: ignore
 
-DEFAULT_CUSTOM = Path("model/best.pt")
 ENV_VAR = "YOLO_MODEL_PATH"
+
+# Download best.pt from your repo
+model_path = hf_hub_download(repo_id="avgsoyam/yolo-garbage-detector", filename="best.pt")
+
+# Load YOLO
+model = YOLO(model_path)
+DEFAULT_CUSTOM = model
 
 
 class ModelLoadError(RuntimeError):
