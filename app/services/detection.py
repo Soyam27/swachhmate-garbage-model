@@ -15,7 +15,7 @@ import os
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 from huggingface_hub import hf_hub_download
 try:
     from ultralytics import YOLO  # type: ignore
@@ -31,6 +31,12 @@ except Exception:  # pragma: no cover
     Image = None  # type: ignore
 
 ENV_VAR = "YOLO_MODEL_PATH"
+
+# Runtime tuning environment variables
+MAX_SIDE = int(os.getenv("YOLO_MAX_SIDE", "640"))          # Clamp max(width, height)
+CONF_THRESH = float(os.getenv("YOLO_CONF", "0.25"))        # Confidence threshold
+DEVICE = os.getenv("YOLO_DEVICE", "cpu")                   # e.g. 'cpu', 'cuda:0'
+USE_HALF = os.getenv("YOLO_HALF", "false").lower() in {"1", "true", "yes"}
 
 # Attempt to download custom weights once at import time, but don't instantiate model yet.
 # If download fails (e.g., no internet), we gracefully fall back later.
@@ -71,9 +77,17 @@ def _get_model():
         raise ModelLoadError(f"ultralytics import failed: {_import_error}")
     weight = _select_weight_path()
     if weight is not None:
-        return YOLO(str(weight))
-    # Fallback to base pretrained weights (downloaded if missing)
-    return YOLO("yolov8n.pt")
+        model = YOLO(str(weight))
+    else:
+        model = YOLO("yolov8n.pt")
+    # Attempt device / half precision adjustment (best effort)
+    try:  # pragma: no cover
+        model.to(DEVICE)
+        if USE_HALF and hasattr(model.model, "half"):
+            model.model.half()
+    except Exception:
+        pass
+    return model
 
 
 def detect_garbage(image_path: str) -> bool:
@@ -86,11 +100,22 @@ def detect_garbage(image_path: str) -> bool:
     return any(len(r.boxes) > 0 for r in results)
 
 
-def detect_garbage_bytes(data: bytes, suffix: str = ".jpg") -> bool:
-    """Run detection directly on raw image bytes without persisting to uploads.
+def _maybe_downscale(pil_img):
+    if Image is None:
+        return pil_img
+    w, h = pil_img.size
+    m = max(w, h)
+    if m <= MAX_SIDE:
+        return pil_img
+    scale = MAX_SIDE / float(m)
+    new_w, new_h = int(w * scale), int(h * scale)
+    return pil_img.resize((new_w, new_h))
 
-    Ultralytics YOLO predict() can take a BytesIO stream or numpy/PIL image. We
-    feed a BytesIO to avoid disk writes. Suffix hints the image format.
+
+def detect_garbage_bytes(data: bytes, suffix: str = ".jpg") -> Dict[str, Any]:
+    """Run detection on raw bytes, with optional resizing & confidence filter.
+
+    Returns structured result for richer client insight.
     """
     model = _get_model()
     if Image is None:
@@ -99,5 +124,28 @@ def detect_garbage_bytes(data: bytes, suffix: str = ".jpg") -> bool:
         img = Image.open(BytesIO(data)).convert("RGB")
     except Exception as e:
         raise ModelLoadError(f"Invalid image data: {e}")
-    results = model(img, verbose=False)
-    return any(len(r.boxes) > 0 for r in results)
+    img = _maybe_downscale(img)
+    # Run inference with configured confidence / device
+    results = model(img, verbose=False, conf=CONF_THRESH, device=DEVICE)
+    total = 0
+    max_conf = 0.0
+    for r in results:
+        boxes = getattr(r, 'boxes', None)
+        if boxes is None:
+            continue
+        count = len(boxes)
+        total += count
+        try:  # attempt to read confidence
+            if count and hasattr(boxes, 'conf'):
+                cmax = float(boxes.conf.max().item())
+                if cmax > max_conf:
+                    max_conf = cmax
+        except Exception:
+            pass
+    return {
+        "garbage_detected": total > 0,
+        "detections": total,
+        "max_confidence": round(max_conf, 4),
+        "confidence_threshold": CONF_THRESH,
+        "resized": True if max(img.size) <= MAX_SIDE else False
+    }
