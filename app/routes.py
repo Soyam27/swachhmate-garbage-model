@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.services.detection import detect_garbage_bytes, ModelLoadError
+from app.services.detection import detect_garbage_bytes, ModelLoadError, model_ready
 import traceback
 import os
 
@@ -16,6 +16,9 @@ async def health():
 
 @router.post("/detect")
 async def detect(file: UploadFile = File(...)):
+    # If startup warmup hasn't completed yet, return a fast 503 to avoid gateway timeouts
+    if not model_ready():
+        raise HTTPException(status_code=503, detail="Model is warming up, try again shortly")
     if file is None:
         raise HTTPException(status_code=400, detail="No file uploaded")
     try:

@@ -35,6 +35,9 @@ DEVICE = os.getenv("YOLO_DEVICE", "cpu")
 USE_HALF = os.getenv("YOLO_HALF", "false").lower() in {"1", "true", "yes"}
 CPU_THREADS = os.getenv("YOLO_CPU_THREADS")
 
+# Internal readiness flag to avoid slow first-request timeouts
+_MODEL_READY: bool = False
+
 # Local model directory relative to this file (absolute path)
 MODEL_DIR = (Path(__file__).resolve().parents[1] / "model").resolve()
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -94,8 +97,14 @@ def _get_model():
 def warmup_model():
     try:
         _get_model()
+        global _MODEL_READY
+        _MODEL_READY = True
     except Exception as e:
         print(f"Warning: model warm-up failed: {e}")
+
+def model_ready() -> bool:
+    """Return True if model has been warmed and is ready for inference."""
+    return _MODEL_READY
 
 def detect_garbage(image_path: str) -> bool:
     model = _get_model()
