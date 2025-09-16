@@ -1,5 +1,7 @@
-fastapi
-uvicorn
-ultralytics
-python-multipart
-huggingface_hub
+fastapi>=0.110,<1
+uvicorn[standard]>=0.23,<1
+ultralytics>=8.2,<9
+torch
+python-multipart>=0.0.7
+pillow>=10
+huggingface_hub>=0.20

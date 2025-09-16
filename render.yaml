@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: swachhmate-garbage-model
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python scripts/precache_model.py || echo "precache skipped"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.14
+      - key: YOLO_MAX_SIDE
+        value: "640"
+      - key: YOLO_CONF
+        value: "0.25"
+      - key: YOLO_DEVICE
+        value: cpu
+      - key: YOLO_HALF
+        value: "false"
+      - key: YOLO_MAX_UPLOAD_BYTES
+        value: "5242880"
