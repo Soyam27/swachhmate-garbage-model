@@ -7,7 +7,6 @@ A FastAPI-based microservice for running YOLOv8 object detection. Includes optio
 - File upload endpoint (`/api/detect`)
 - Health check endpoint (`/api/health`)
 - Simple model hot-swap via `app/model/best.pt`
-- Training script to fine-tune a model (`training/train.py`)
 - Deployable to Render / Heroku (Procfile included)
 
 ## Project Structure
@@ -18,10 +17,11 @@ app/
   services/detection.py
   utils/preprocess.py
   model/            # Place model weights here (best.pt or yolov8n.pt)
-training/train.py   # Fine-tune script
 requirements.txt
 Procfile
 runtime.txt
+smoke_test.py
+render.yaml
 ```
 
 ## Setup
@@ -54,69 +54,17 @@ Multipart form with a `file` field (image). Returns JSON like:
   "resized": true
 }
 ```
-Example using `curl`:
-```bash
-curl -X POST -F "file=@sample.jpg" http://localhost:8000/api/detect
-```
 
 ## Model Weights
 Place a custom model at `app/model/best.pt` (preferred) or `app/model/yolov8n.pt`. If missing, the default `yolov8n.pt` will auto-download at first inference.
 
-## Training
-Prepare a YOLO dataset YAML (see ultralytics docs). Then run:
-```bash
-python training/train.py --data path/to/data.yaml --model yolov8n.pt --epochs 50 --imgsz 640
-```
-After training, copy your best weights to `app/model/best.pt`.
 
 ## Deployment (Heroku/Render)
 The `Procfile` runs:
 ```
 web: uvicorn app.main:app --host=0.0.0.0 --port=${PORT:-8000}
 ```
-Ensure you set a persistent volume or re-upload weights if the dyno restarts (Heroku ephemeral FS).
 
 ### Render
 Use the included `render.yaml` to create a Web Service. It installs requirements and optionally pre-caches the model during build via `scripts/precache_model.py`.
 
-### Heroku
-Add environment variables and deploy. If you need to pre-cache weights, run `python scripts/precache_model.py` in a Release phase or at first boot.
-
-## Runtime Tuning / Environment Variables
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `YOLO_MODEL_PATH` | (auto) | Explicit weight file path. If unset tries downloaded HF weight, then `yolov8n.pt`. |
-| `YOLO_MAX_SIDE` | `640` | Max dimension to downscale images before inference (reduces memory & latency). |
-| `YOLO_CONF` | `0.25` | Confidence threshold for filtering predictions. |
-| `YOLO_DEVICE` | `cpu` | Device string for model (`cpu`, `cuda:0` if GPU available). |
-| `YOLO_HALF` | `false` | Use half precision (may reduce memory if supported). |
-| `YOLO_MAX_UPLOAD_BYTES` | `5242880` | Reject uploads larger than this many bytes (5MB default). |
-
-Set these in your environment or hosting provider's config. Example (PowerShell):
-```powershell
-$env:YOLO_MAX_SIDE = "480"
-$env:YOLO_CONF = "0.25"
-$env:YOLO_DEVICE = "cpu"  # or "cuda:0" if available
-```
-
-## Memory / Deployment Tips
-1. Prefer the nano / small YOLO weights (n / s) for limited RAM.
-2. Enable `YOLO_MAX_SIDE=480` (or even 384) if you only need coarse detection.
-3. Use `YOLO_HALF=true` only if running on GPU that supports FP16; on pure CPU it may not help.
-4. Remove unused dependencies (e.g., `opencv-python` if not used) to shrink slug and memory.
-5. First request may be slow (model load + weight download). The app warms up the model on startup to reduce first-request latency.
-6. Monitor logs for `Killed` or OOM indications; reduce `YOLO_MAX_SIDE` if seen.
-
-## Notes
-- Large models may exceed free tier memory.
-- Adjust image size & weights to stay within plan limits.
-- Add authentication / rate limiting before public exposure.
-
-## Quick smoke test
-```powershell
-python smoke_test.py
-```
-You should see a JSON result printed; detections on a blank image are expected to be 0.
-
-## License
-MIT (adjust if needed).
